@@ -1,5 +1,8 @@
 name: FIFO verification
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
 jobs:
   smoke-test:
     runs-on: ubuntu-latest
