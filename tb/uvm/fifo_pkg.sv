@@ -1,128 +1,26 @@
 package fifo_pkg;
-  import uvm_pkg::*;
-  `include "uvm_macros.svh"
-
-  class fifo_item extends uvm_sequence_item;
-    rand bit wr_en, rd_en;
-    rand bit [7:0] data;
-    bit [7:0] rdata;
-    bit full, empty;
-    `uvm_object_utils_begin(fifo_item)
-      `uvm_field_int(wr_en, UVM_DEFAULT)
-      `uvm_field_int(rd_en, UVM_DEFAULT)
-      `uvm_field_int(data, UVM_HEX)
-      `uvm_field_int(rdata, UVM_HEX)
-      `uvm_field_int(full, UVM_DEFAULT)
-      `uvm_field_int(empty, UVM_DEFAULT)
-    `uvm_object_utils_end
-    function new(string name="fifo_item"); super.new(name); endfunction
-  endclass
-
-  class fifo_sequence extends uvm_sequence #(fifo_item);
-    `uvm_object_utils(fifo_sequence)
-    function new(string name="fifo_sequence"); super.new(name); endfunction
-    task body();
-      repeat (100) begin
-        req = fifo_item::type_id::create("req");
-        start_item(req);
-        assert(req.randomize() with { wr_en dist {1:=3,0:=1}; rd_en dist {1:=2,0:=2}; });
-        finish_item(req);
-      end
-    endtask
-  endclass
-
-  class fifo_driver extends uvm_driver #(fifo_item);
-    `uvm_component_utils(fifo_driver)
-    virtual fifo_if vif;
-    function new(string name, uvm_component parent); super.new(name,parent); endfunction
-    function void build_phase(uvm_phase phase);
-      if(!uvm_config_db#(virtual fifo_if)::get(this,"","vif",vif)) `uvm_fatal("NOVIF","fifo_if missing")
-    endfunction
-    task run_phase(uvm_phase phase);
-      forever begin
-        seq_item_port.get_next_item(req);
-        @(negedge vif.clk); vif.wr_en<=req.wr_en; vif.rd_en<=req.rd_en; vif.data_in<=req.data;
-        @(negedge vif.clk); vif.wr_en<=0; vif.rd_en<=0;
-        seq_item_port.item_done();
-      end
-    endtask
-  endclass
-
-  class fifo_monitor extends uvm_monitor;
-    `uvm_component_utils(fifo_monitor)
-    virtual fifo_if vif;
-    uvm_analysis_port #(fifo_item) ap;
-    function new(string name, uvm_component parent); super.new(name,parent); ap=new("ap",this); endfunction
-    function void build_phase(uvm_phase phase);
-      if(!uvm_config_db#(virtual fifo_if)::get(this,"","vif",vif)) `uvm_fatal("NOVIF","fifo_if missing")
-    endfunction
-    task run_phase(uvm_phase phase);
-      forever begin
-        @(posedge vif.clk); #1;
-        if(vif.rst_n && (vif.wr_en || vif.rd_en)) begin
-          fifo_item t=fifo_item::type_id::create("t");
-          t.wr_en=vif.wr_en; t.rd_en=vif.rd_en; t.data=vif.data_in; t.rdata=vif.data_out;
-          t.full=vif.full; t.empty=vif.empty; ap.write(t);
-        end
-      end
-    endtask
-  endclass
-
-  class fifo_scoreboard extends uvm_scoreboard;
-    `uvm_component_utils(fifo_scoreboard)
-    uvm_analysis_imp #(fifo_item,fifo_scoreboard) imp;
-    bit [7:0] model[$]; int checks, errors;
-    function new(string name, uvm_component parent); super.new(name,parent); imp=new("imp",this); endfunction
-    function void write(fifo_item t);
-      bit can_write=(t.wr_en && model.size()<16);
-      bit can_read=(t.rd_en && model.size()>0);
-      bit [7:0] expected;
-      if(can_read) begin
-        expected=model.pop_front(); checks++;
-        if(t.rdata!==expected) begin
-          errors++;
-          `uvm_error("FIFO_DATA",$sformatf("expected=%0h got=%0h",expected,t.rdata))
-        end
-      end
-      if(can_write) model.push_back(t.data);
-    endfunction
-    function void report_phase(uvm_phase phase);
-      `uvm_info("FIFO_SUMMARY",$sformatf("transactions_checked=%0d scoreboard_errors=%0d",checks,errors),UVM_NONE)
-    endfunction
-  endclass
-
-  class fifo_coverage extends uvm_subscriber #(fifo_item);
-    `uvm_component_utils(fifo_coverage)
-    fifo_item tr;
-    covergroup cg;
-      cp_op: coverpoint {tr.wr_en,tr.rd_en} { bins idle={0}; bins read={1}; bins write={2}; bins simultaneous={3}; }
-      cp_data: coverpoint tr.data { bins zero={0}; bins max={8'hff}; bins other=default; }
-      op_x_data: cross cp_op,cp_data;
-    endgroup
-    function new(string name,uvm_component parent); super.new(name,parent); cg=new; endfunction
-    function void write(fifo_item t); tr=t; cg.sample(); endfunction
-  endclass
-
-  class fifo_env extends uvm_env;
-    `uvm_component_utils(fifo_env)
-    uvm_sequencer #(fifo_item) seqr; fifo_driver drv; fifo_monitor mon; fifo_scoreboard sb; fifo_coverage cov;
-    function new(string name,uvm_component parent); super.new(name,parent); endfunction
-    function void build_phase(uvm_phase phase);
-      seqr=uvm_sequencer#(fifo_item)::type_id::create("seqr",this); drv=fifo_driver::type_id::create("drv",this);
-      mon=fifo_monitor::type_id::create("mon",this); sb=fifo_scoreboard::type_id::create("sb",this); cov=fifo_coverage::type_id::create("cov",this);
-    endfunction
-    function void connect_phase(uvm_phase phase);
-      drv.seq_item_port.connect(seqr.seq_item_export); mon.ap.connect(sb.imp); mon.ap.connect(cov.analysis_export);
-    endfunction
-  endclass
-
-  class fifo_test extends uvm_test;
-    `uvm_component_utils(fifo_test)
-    fifo_env env;
-    function new(string name,uvm_component parent); super.new(name,parent); endfunction
-    function void build_phase(uvm_phase phase); env=fifo_env::type_id::create("env",this); endfunction
-    task run_phase(uvm_phase phase);
-      fifo_sequence seq=fifo_sequence::type_id::create("seq"); phase.raise_objection(this); seq.start(env.seqr); #100; phase.drop_objection(this);
-    endtask
-  endclass
+ import uvm_pkg::*; `include "uvm_macros.svh"
+ class fifo_item extends uvm_sequence_item;
+  rand bit wr_en,rd_en; rand bit[7:0] data; bit[7:0] rdata; bit full,empty; bit reset;
+  `uvm_object_utils_begin(fifo_item) `uvm_field_int(wr_en,UVM_DEFAULT) `uvm_field_int(rd_en,UVM_DEFAULT) `uvm_field_int(data,UVM_HEX) `uvm_field_int(rdata,UVM_HEX) `uvm_field_int(full,UVM_DEFAULT) `uvm_field_int(empty,UVM_DEFAULT) `uvm_field_int(reset,UVM_DEFAULT) `uvm_object_utils_end
+  function new(string name="fifo_item");super.new(name);endfunction
+ endclass
+ class fifo_sequence extends uvm_sequence#(fifo_item); `uvm_object_utils(fifo_sequence) function new(string n="fifo_sequence");super.new(n);endfunction
+  task body(); repeat(100) begin req=fifo_item::type_id::create("req");start_item(req);if(!req.randomize() with {wr_en dist{1:=3,0:=1};rd_en dist{1:=2,0:=2};}) `uvm_fatal("RAND","fifo_item randomization failed") finish_item(req);end endtask endclass
+ class fifo_reset_sequence extends uvm_sequence#(fifo_item); `uvm_object_utils(fifo_reset_sequence) function new(string n="fifo_reset_sequence");super.new(n);endfunction task body(); req=fifo_item::type_id::create("reset_req");start_item(req);req.reset=1;req.wr_en=0;req.rd_en=0;req.data='0;finish_item(req);endtask endclass
+ class fifo_overflow_sequence extends uvm_sequence#(fifo_item); `uvm_object_utils(fifo_overflow_sequence) function new(string n="fifo_overflow_sequence");super.new(n);endfunction task body(); repeat(17) begin req=fifo_item::type_id::create("ov");start_item(req);req.reset=0;req.wr_en=1;req.rd_en=0;req.data=$urandom;finish_item(req);end endtask endclass
+ class fifo_underflow_sequence extends uvm_sequence#(fifo_item); `uvm_object_utils(fifo_underflow_sequence) function new(string n="fifo_underflow_sequence");super.new(n);endfunction task body(); repeat(17) begin req=fifo_item::type_id::create("un");start_item(req);req.reset=0;req.wr_en=0;req.rd_en=1;req.data=0;finish_item(req);end endtask endclass
+ class fifo_simultaneous_sequence extends uvm_sequence#(fifo_item); `uvm_object_utils(fifo_simultaneous_sequence) function new(string n="fifo_simultaneous_sequence");super.new(n);endfunction task body(); repeat(8) begin req=fifo_item::type_id::create("sim");start_item(req);req.reset=0;req.wr_en=1;req.rd_en=1;req.data=$urandom;finish_item(req);end endtask endclass
+ class fifo_driver extends uvm_driver#(fifo_item); `uvm_component_utils(fifo_driver) virtual fifo_if vif; function new(string n,uvm_component p);super.new(n,p);endfunction function void build_phase(uvm_phase phase);super.build_phase(phase);if(!uvm_config_db#(virtual fifo_if)::get(this,"","vif",vif))`uvm_fatal("NOVIF","fifo_if missing")endfunction
+  task run_phase(uvm_phase phase);forever begin seq_item_port.get_next_item(req);if(req.reset)begin @(negedge vif.clk);vif.rst_n<=0;vif.wr_en<=0;vif.rd_en<=0;repeat(2)@(negedge vif.clk);vif.rst_n<=1;end else begin @(negedge vif.clk);vif.wr_en<=req.wr_en;vif.rd_en<=req.rd_en;vif.data_in<=req.data;@(negedge vif.clk);vif.wr_en<=0;vif.rd_en<=0;end seq_item_port.item_done();end endtask endclass
+ class fifo_monitor extends uvm_monitor; `uvm_component_utils(fifo_monitor) virtual fifo_if vif;uvm_analysis_port#(fifo_item)ap;function new(string n,uvm_component p);super.new(n,p);ap=new("ap",this);endfunction function void build_phase(uvm_phase phase);super.build_phase(phase);if(!uvm_config_db#(virtual fifo_if)::get(this,"","vif",vif))`uvm_fatal("NOVIF","fifo_if missing")endfunction
+  task run_phase(uvm_phase phase);forever begin @(posedge vif.clk);#1;if(vif.rst_n)begin fifo_item t=fifo_item::type_id::create("t");t.wr_en=vif.wr_en;t.rd_en=vif.rd_en;t.data=vif.data_in;t.rdata=vif.data_out;t.full=vif.full;t.empty=vif.empty;ap.write(t);end end endtask endclass
+ class fifo_scoreboard extends uvm_scoreboard; `uvm_component_utils(fifo_scoreboard) uvm_analysis_imp#(fifo_item,fifo_scoreboard)imp;bit[7:0]model[$];int checks,errors,depth;
+  function new(string n,uvm_component p);super.new(n,p);imp=new("imp",this);endfunction function void build_phase(uvm_phase phase);super.build_phase(phase);if(!uvm_config_db#(int)::get(this,"","depth",depth))`uvm_fatal("NODEPTH","FIFO depth missing")endfunction
+  function void write(fifo_item t);bit can_write=(t.wr_en&&model.size()<depth);bit can_read=(t.rd_en&&model.size()>0);bit[7:0]expected;if(can_read)begin expected=model.pop_front();checks++;if(t.rdata!==expected)begin errors++;`uvm_error("FIFO_DATA",$sformatf("expected=%0h got=%0h",expected,t.rdata))end end if(can_write)model.push_back(t.data);checks+=2;if(t.empty!==(model.size()==0))begin errors++;`uvm_error("FIFO_EMPTY","empty mismatch")end if(t.full!==(model.size()==depth))begin errors++;`uvm_error("FIFO_FULL","full mismatch")end endfunction
+  function void report_phase(uvm_phase phase);`uvm_info("FIFO_SUMMARY",$sformatf("checks=%0d errors=%0d",checks,errors),UVM_NONE)endfunction endclass
+ class fifo_coverage extends uvm_subscriber#(fifo_item);`uvm_component_utils(fifo_coverage)fifo_item tr;covergroup cg;cp_op:coverpoint{tr.wr_en,tr.rd_en}{bins idle={0};bins read={1};bins write={2};bins simultaneous={3};}cp_data:coverpoint tr.data{bins zero={0};bins max={8'hff};bins other=default;}op_x_data:cross cp_op,cp_data;endgroup function new(string n,uvm_component p);super.new(n,p);cg=new;endfunction function void write(fifo_item t);tr=t;cg.sample();endfunction endclass
+ class fifo_agent extends uvm_agent;`uvm_component_utils(fifo_agent)uvm_sequencer#(fifo_item)seqr;fifo_driver drv;fifo_monitor mon;function new(string n,uvm_component p);super.new(n,p);endfunction function void build_phase(uvm_phase phase);super.build_phase(phase);mon=fifo_monitor::type_id::create("mon",this);if(get_is_active()==UVM_ACTIVE)begin seqr=uvm_sequencer#(fifo_item)::type_id::create("seqr",this);drv=fifo_driver::type_id::create("drv",this);end endfunction function void connect_phase(uvm_phase phase);if(get_is_active()==UVM_ACTIVE)drv.seq_item_port.connect(seqr.seq_item_export);endfunction endclass
+ class fifo_env extends uvm_env;`uvm_component_utils(fifo_env)fifo_agent agent;fifo_scoreboard sb;fifo_coverage cov;function new(string n,uvm_component p);super.new(n,p);endfunction function void build_phase(uvm_phase phase);super.build_phase(phase);agent=fifo_agent::type_id::create("agent",this);sb=fifo_scoreboard::type_id::create("sb",this);cov=fifo_coverage::type_id::create("cov",this);endfunction function void connect_phase(uvm_phase phase);agent.mon.ap.connect(sb.imp);agent.mon.ap.connect(cov.analysis_export);endfunction endclass
+ class fifo_test extends uvm_test;`uvm_component_utils(fifo_test)fifo_env env;function new(string n,uvm_component p);super.new(n,p);endfunction function void build_phase(uvm_phase phase);super.build_phase(phase);env=fifo_env::type_id::create("env",this);endfunction task run_phase(uvm_phase phase);fifo_reset_sequence r=fifo_reset_sequence::type_id::create("r");fifo_overflow_sequence o=fifo_overflow_sequence::type_id::create("o");fifo_underflow_sequence u=fifo_underflow_sequence::type_id::create("u");fifo_simultaneous_sequence s=fifo_simultaneous_sequence::type_id::create("s");fifo_sequence x=fifo_sequence::type_id::create("x");phase.raise_objection(this);r.start(env.agent.seqr);o.start(env.agent.seqr);s.start(env.agent.seqr);u.start(env.agent.seqr);r.start(env.agent.seqr);x.start(env.agent.seqr);phase.drop_objection(this);endtask endclass
 endpackage

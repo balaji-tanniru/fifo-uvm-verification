@@ -11,6 +11,7 @@ module fifo_tb;
   integer checks = 0, errors = 0, seed = 32'h51F0_2026;
 
   sync_fifo #(.WIDTH(WIDTH), .DEPTH(DEPTH)) dut (.*);
+  fifo_checker #(.DEPTH(DEPTH)) fifo_chk(.clk,.rst_n,.wr_en,.rd_en,.full,.empty,.count);
   always #5 clk = ~clk;
 
   task automatic drive(input bit w, input bit r, input logic [WIDTH-1:0] d);

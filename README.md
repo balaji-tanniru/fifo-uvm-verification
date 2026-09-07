@@ -1,3 +1,13 @@
+# FIFO UVM Verification
+
+## Verification status
+
+The portable smoke flow includes `fifo_checker.sv` and is defined for Icarus Verilog. It was not executed here because Icarus was not installed. The UVM environment and SVA interface are written for a UVM-capable simulator and were not run here.
+
+## Repository
+
+This repository contains the RTL/testbench/automation sources for the project. Review fixes are summarized in the package-level `CHANGES.md`.
+
 # Synchronous FIFO UVM Verification
 
 Portfolio-grade verification of a parameterized synchronous FIFO. The repository contains synthesizable RTL, a portable self-checking SystemVerilog regression, a complete UVM architecture, assertions, functional coverage, waveform generation, and Linux CI.
