@@ -1,4 +1,14 @@
-# Synchronous FIFO Verification
+# FIFO UVM Verification
+
+## Verification status
+
+The portable smoke flow includes `fifo_checker.sv` and is defined for Icarus Verilog. It was not executed here because Icarus was not installed. The UVM environment and SVA interface are written for a UVM-capable simulator and were not run here.
+
+## Repository
+
+This repository contains the RTL/testbench/automation sources for the project. Review fixes are summarized in the package-level `CHANGES.md`.
+
+# Synchronous FIFO UVM Verification
 
 This is my second SystemVerilog verification project.
 
